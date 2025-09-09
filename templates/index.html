@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OncoTrack: Detect. Decode. Decide.</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 960px; margin: 24px auto; line-height: 1.4; }
+    h1 { margin-bottom: 8px; }
+    form { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .section { border: 1px solid #ddd; padding: 16px; border-radius: 8px; }
+    textarea { width: 100%; }
+    label { display: block; font-weight: bold; margin-top: 8px; }
+    input[type="text"] { width: 100%; padding: 8px; }
+    .full { grid-column: 1 / span 2; }
+    .submit-row { grid-column: 1 / span 2; display: flex; gap: 12px; }
+    .btn { padding: 10px 16px; border: none; background: #2563eb; color: white; border-radius: 6px; cursor: pointer; }
+    .btn:hover { background: #1e40af; }
+    .error { background: #fee2e2; color: #991b1b; padding: 12px; border-radius: 6px; margin: 16px 0; }
+    .result { background: #f8fafc; border: 1px solid #e5e7eb; padding: 16px; border-radius: 8px; margin-top: 16px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; white-space: pre-wrap; }
+    .mut { background: #fff7ed; padding: 6px 10px; border-radius: 6px; display: inline-block; margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>OncoTrack: Detect. Decode. Decide.</h1>
+  <p>Enter a <b>gene</b> (e.g., <code>KRAS</code>), <b>exon number</b> (e.g., <code>2</code>), and paste the patient's <b>exon DNA sequence</b> (A/C/G/T/N only). The tool will fetch the human RefSeq mRNA, extract that exon, and compare.</p>
+
+  {% if error %}
+    <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <!-- MAIN ANALYZE FORM -->
+  <form method="POST">
+    <!-- this hidden field is required by app.py to trigger the analyze path -->
+    <input type="hidden" name="action" value="analyze">
+
+    <div class="section">
+      <h3>Primary (Required)</h3>
+      <label>Gene (symbol):</label>
+      <input type="text" name="gene" placeholder="KRAS" required>
+      <label>Exon number:</label>
+      <input type="text" name="exon" placeholder="2" required>
+      <label>Patient DNA sequence (FASTA or raw, A/C/G/T/N only):</label>
+      <textarea name="sequence" rows="8" placeholder=">Patient_exon2&#10;ATGACTG..."></textarea>
+    </div>
+
+    <div class="section">
+      <h3>Secondary (Optional)</h3>
+      <label>Age:</label>
+      <input type="text" name="age" placeholder="e.g., 45">
+      <label>Sex:</label>
+      <input type="text" name="sex" placeholder="M / F">
+      <label>Cancer Type:</label>
+      <input type="text" name="cancer_type" placeholder="e.g., Lung adenocarcinoma">
+
+      <label>Doctor's notes (optional):</label>
+      <!-- prefill with result.doctor_notes when available so notes persist -->
+      <textarea name="doctor_notes" id="doctor_notes" rows="4" placeholder="Brief clinical notes, symptoms, family history...">{{ result.doctor_notes if result and result.doctor_notes is defined else '' }}</textarea>
+    </div>
+
+    <div class="submit-row">
+      <button type="submit" class="btn">Analyze</button>
+    </div>
+  </form>
+  <!-- END MAIN FORM -->
+
+  {% if result %}
+    <div class="result">
+      <h3>Results</h3>
+      <p><b>Gene:</b> {{ result.gene }} &nbsp; | &nbsp;
+         <b>RefSeq mRNA:</b> {{ result.ref_accession }} &nbsp; | &nbsp;
+         <b>Exon:</b> {{ result.exon }}</p>
+      <p><b>Exon length (ref):</b> {{ result.exon_ref_length }} &nbsp; | &nbsp;
+         <b>Patient length:</b> {{ result.patient_length }}</p>
+
+      {% if result.note %}
+        <p><b>Note:</b> {{ result.note }}</p>
+      {% endif %}
+
+      <h4>Variants</h4>
+      {% if result.variants_hgvs and result.variants_hgvs|length > 0 %}
+        {% for v in result.variants_hgvs %}
+          <div class="mut">{{ v }}</div><br>
+        {% endfor %}
+      {% else %}
+        <div class="mut">No differences detected (exact exon match)</div>
+      {% endif %}
+
+      <h4>Alignment (reference vs patient)</h4>
+      <div class="mono">
+        {{ result.aligned_ref }}
+        <br>
+        {{ result.aligned_obs }}
+      </div>
+
+      <h4>Patient info</h4>
+      <div class="mono">{{ result.patient_info }}</div>
+
+      <!-- REPORT GENERATION FORM (only shown when a result exists) -->
+      <form method="POST" action="/generate_report" id="report_form" class="full" style="margin-top:12px;">
+        <input type="hidden" name="gene" value="{{ result.gene }}">
+        <input type="hidden" name="exon" value="{{ result.exon }}">
+        <input type="hidden" name="ref_accession" value="{{ result.ref_accession }}">
+        <input type="hidden" name="variants_hgvs" value="{{ result.variants_hgvs | join('\\n') }}">
+        <input type="hidden" name="aligned_ref" value="{{ result.aligned_ref }}">
+        <input type="hidden" name="aligned_obs" value="{{ result.aligned_obs }}">
+        <!-- add exon length hidden fields so generate_report receives them -->
+        <input type="hidden" name="exon_ref_length" value="{{ result.exon_ref_length if result.exon_ref_length is defined else '' }}">
+        <input type="hidden" name="patient_length" value="{{ result.patient_length if result.patient_length is defined else '' }}">
+        <input type="hidden" name="age" value="{{ result.patient_info['age'] if result.patient_info and result.patient_info['age'] else '' }}">
+        <input type="hidden" name="sex" value="{{ result.patient_info['sex'] if result.patient_info and result.patient_info['sex'] else '' }}">
+        <input type="hidden" name="cancer_type" value="{{ result.patient_info['cancer_type'] if result.patient_info and result.patient_info['cancer_type'] else '' }}">
+        <!-- hidden doctor notes prefills with result.doctor_notes; JS will overwrite with textarea value on submit -->
+        <input type="hidden" name="hidden_doctor_notes" id="hidden_doctor_notes" value="{{ result.doctor_notes if result and result.doctor_notes is defined else '' }}">
+        <button type="submit" id="generateReportBtn" class="btn">Report</button>
+      </form>
+    </div>
+  {% else %}
+    <!-- If there's no result yet, show a disabled Report button for UX continuity -->
+    <div style="margin-top:16px;">
+      <button class="btn" disabled>Report</button>
+    </div>
+  {% endif %}
+
+<script>
+  // copy doctor's notes into hidden input before report form submit
+  const reportForm = document.getElementById('report_form');
+  const notesTextarea = document.getElementById('doctor_notes');
+  const hiddenNotes = document.getElementById('hidden_doctor_notes');
+  if (reportForm) {
+    reportForm.addEventListener('submit', function(e){
+      hiddenNotes.value = notesTextarea ? notesTextarea.value.trim() : "";
+    });
+  }
+</script>
+</body>
+</html>
