@@ -104,7 +104,6 @@ def generate_report_route():
                 variants_hgvs = [variants_hgvs_raw.strip()]
 
         # Read exon lengths added as hidden fields in the form (from analyze step).
-        # (We do not display these in the Molecular Profiling table per your earlier change.)
         exon_ref_length = request.form.get("exon_ref_length") or None
         patient_length = request.form.get("patient_length") or None
 
@@ -124,14 +123,11 @@ def generate_report_route():
         report_text = ""
         if generate_executive_summary is not None:
             try:
-                # Generate the AI text (this is the preview content).
-                # Use a slightly conservative token budget so longer inputs don't overflow.
                 report_text = generate_executive_summary(
                     analysis, patient_info, doctor_notes or None, desired_output_tokens=650
                 )
             except Exception as e:
                 app.logger.exception("generate_executive_summary failed")
-                # Preserve the detailed error message for transparency in the preview.
                 report_text = f"Executive summary generation failed: {e}"
         elif generate_report_legacy is not None:
             try:
@@ -142,7 +138,6 @@ def generate_report_route():
         else:
             report_text = "AI report generation not available on this server."
 
-        # ---------- Render the HTML-only preview (no PDF path at all) ----------
         return render_template(
             "report_preview.html",
             report_text=report_text,
@@ -157,7 +152,6 @@ def generate_report_route():
         return redirect(url_for("index"))
 
 
-# Retained utility; harmless if unused elsewhere.
 def wrap_text(text: str, max_chars: int):
     words = text.split()
     if not words:
@@ -180,4 +174,5 @@ def wrap_text(text: str, max_chars: int):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))  # ✅ Use Render's PORT, fallback 5000 for local
+    app.run(host="0.0.0.0", port=port, debug=True)  # ✅ Bind to all interfaces
