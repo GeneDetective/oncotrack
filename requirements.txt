@@ -1,3 +1,4 @@
 flask==3.0.3
 biopython==1.85
 requests==2.32.5
+reportlab==3.6.12
